@@ -1,97 +1,86 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const { exec } = require('child_process');
+const { spawn, exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
-const PythonShell = require('python-shell').PythonShell;
-//const { PythonShell } = require('python-shell');
-const generateFile = require('./generateFile')
-const executeConly = require('./executeC.js');
-const { spawn } = require('child_process');
-
-var options = {
-    mode: 'text',
-    pythonPath: 'parser.py',
-    pythonOptions: ['-u'],
-    scriptPath: 'path/to/my/scripts',
-    args: ['value1', 'value2', 'value3']
-  };
+const generateFile = require('./generateFile');
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-app.post('/compile', async(req, res) => {
-    const code = req.body.code;
+let programProcess = null;
+
+app.post('/compile', async (req, res) => {
+
+    const { code, inputCases } = req.body; // Destructure code and inputCases from the request body
+
+    console.log("Incoming Request Body:", req.body); // Add this line to log the incoming request
 
     if (!code) {
         return res.status(400).json({ error: 'No code provided' });
     }
 
-  try {
-    // Generate file based on language and code
-    let filePath;
-    filePath = await generateFile(code);
-    let output;
-    output = await executeConly(filePath, code);
+    if (!Array.isArray(inputCases) || inputCases.length === 0) {
+        return res.status(400).json({ error: 'No input cases provided' });
+    }
 
-    const inputText = req.body.code;
+    try {
+        const filePath = await generateFile(code);
+        const jobId = path.basename(filePath).split('.')[0];
+        const outPath = path.join(__dirname, 'outputs', `${jobId}`);
 
-    console.log(inputText)
+        exec(`gcc "${filePath}" -o "${outPath}"`, (error, stdout, stderr) => {
+            if (error || stderr) {
+                const errorMessage = stderr
+                    .split('\n')
+                    .filter(line => line.includes(':'))
+                    .map(line => line.trim())
+                    .join('\n');
+                return res.status(500).json({ error: errorMessage || 'Compilation failed with an unknown error.' });
+            }
 
-    // Spawn a new Python process
-    const pythonProcess = spawn('python', ['parser.py', inputText]);
+            const runCmd = process.platform === 'win32' ? `${outPath}.exe` : `./${outPath}`;
 
-    let complexityAnalysis = '';
+            const results = [];
+            const executionTimes = []; // Store execution times for each test case
 
-    // Capture data from the Python script's stdout
-    pythonProcess.stdout.on('data', (data) => {
-        complexityAnalysis += data.toString();
-    });
+            inputCases.forEach((input, idx) => {
+                const startTime = Date.now(); // Start measuring time for each test case
 
-    // Capture any error messages
-    pythonProcess.stderr.on('data', (data) => {
-        console.error(`Error: ${data}`);
-    });
+                programProcess = spawn(runCmd, { cwd: path.join(__dirname, 'outputs') });
 
-    console.log(complexityAnalysis)
+                if (input) {
+                    programProcess.stdin.write(`${input}\n`);
+                }
 
-    // When the process finishes, send the output back to the frontend
-    pythonProcess.on('close', (code) => {
-        res.json({ output: output,
-            timeComplexity : complexityAnalysis,
-         });
-    });
+                programProcess.stdout.on('data', (data) => {
+                    results[idx] = data.toString();
+                });
 
-    // Delete generated file
-    // fs.unlink(filePath, () => {});
-    // console.log(output);
-    // const spawn = require("child_process").spawn;
-    // const pythonProcess = spawn('python',["parser.py", code])
-    // pythonProcess.stdout.on('data', (data) => {
-    //     // Do something with the data returned from python script
-    //     const complexityAnalysis = JSON.parse(data);
-    //     res.json({
-    //         output:output,
-    //         timeComplexity : complexityAnalysis
-    //     })
-    //    })
-    // try {
-        
-    //     // ... (use complexityAnalysis in your server logic) ...
-    // } catch (parseError) {
-    //     console.error("Failed to parse Python script output:", parseError);
-    //     res.status(500).json({ error: 'Failed to parse analysis results' });
-    // }
-    // res.json({
-    //     output: output,
-    // })
-  } catch (error) {
-    console.error("Error running code:", error);
-    res.status(500).json({ error: "Failed to run code" });
-  }
+                programProcess.stderr.on('data', (data) => {
+                    results[idx] = `Error: ${data.toString()}`;
+                });
+
+                programProcess.on('close', () => {
+                    const endTime = Date.now(); // End measuring time for each test case
+                    const executionTime = endTime - startTime; // Calculate execution time
+                    executionTimes[idx] = executionTime; // Store execution time
+                    programProcess = null;
+
+                    // Check if all test cases have been processed
+                    if (results.length === inputCases.length) {
+                        const avgExecutionTime = executionTimes.reduce((acc, time) => acc + time, 0) / executionTimes.length;
+                        res.json({ output: results, executionTimes, avgExecutionTime });
+                    }
+                });
+            });
+        });
+    } catch (error) {
+        console.error("Error running code:", error);
+        res.status(500).json({ error: "Failed to run code" });
+    }
 });
 
 const PORT = 5000;

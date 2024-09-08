@@ -1,22 +1,14 @@
 const fs = require('fs');
 const path = require('path');
-const { v4: uuid } = require('uuid');
 
-const dirCodes = path.join(__dirname, 'codes');
+const generateFile = async (code) => {
+    const fileId = `${Date.now()}`;
+    const filePath = path.join(__dirname, 'outputs', `${fileId}.c`);
 
-// Create the 'codes' directory if it doesn't exist
-if (!fs.existsSync(dirCodes)) {
-  fs.mkdirSync(dirCodes, { recursive: true });
-}
+    await fs.promises.writeFile(filePath, code);
+    console.log(`Generated file path: ${filePath}`);
 
-// Function to generate a file
-const generateFile = async (content) => {
-  const jobID = uuid();
-  const filename = `${jobID}.c`; 
-  const filePath = path.join(dirCodes, filename);
-
-  await fs.promises.writeFile(filePath, content);
-  return filePath;
+    return filePath;
 };
 
-module.exports = generateFile; // Export the function
+module.exports = generateFile;

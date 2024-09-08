@@ -4,40 +4,37 @@ const path = require('path');
 
 const outputPath = path.join(__dirname, 'outputs');
 
-// Create the 'outputs' directory if it doesn't exist
 if (!fs.existsSync(outputPath)) {
-  fs.mkdirSync(outputPath, { recursive: true });
+    fs.mkdirSync(outputPath, { recursive: true });
 }
 
-// Function to execute C code
+// Function to execute C code with user input
 const executeC = (filepath, input) => {
-  const jobId = path.basename(filepath).split('.')[0];
-  const outPath = path.join(outputPath, `${jobId}.out`); // Use .out file extension
-  const inputPath = path.join(outputPath, `${jobId}.txt`); // New input file path
+    const jobId = path.basename(filepath).split('.')[0];
+    const outPath = path.join(outputPath, `${jobId}.out`);
+    const inputPath = path.join(outputPath, `${jobId}.txt`);
 
-  return new Promise((resolve, reject) => {
-    fs.writeFile(inputPath, input, (error) => {
-      if (error) {
-        reject(error);
-      } else {
-        exec(
-          `gcc "${filepath}" -o "${outPath}" && cd "${outputPath}" && "./${jobId}.out" < "${inputPath}"`, // Use quotes for paths
-          (error, stdout, stderr) => {
-            // Clean up the .out and .txt files
-            fs.unlink(outPath, () => {});
-            fs.unlink(inputPath, () => {});
+    return new Promise((resolve, reject) => {
+        fs.writeFile(inputPath, input, (error) => {
             if (error) {
-              reject({ error, stderr });
-            } else if (stderr) {
-              reject(stderr);
+                reject(error);
             } else {
-              resolve(stdout);
+                exec(
+                    `gcc "${filepath}" -o "${outPath}" && cd "${outputPath}" && "./${jobId}.out" < "${inputPath}"`,
+                    (error, stdout, stderr) => {
+                        fs.unlink(outPath, () => {});
+                        fs.unlink(inputPath, () => {});
+
+                        if (error || stderr) {
+                            reject({ error: error ? error.message : stderr });
+                        } else {
+                            resolve(stdout);
+                        }
+                    }
+                );
             }
-          }
-        );
-      }
+        });
     });
-  });
 };
 
-module.exports = executeC; // Use CommonJS export
+module.exports = executeC;
